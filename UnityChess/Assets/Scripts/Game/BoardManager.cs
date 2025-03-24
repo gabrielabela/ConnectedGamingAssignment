@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using Unity.Netcode;
 using UnityChess;
 using UnityEngine;
 using static UnityChess.SquareUtil;
@@ -8,7 +9,7 @@ using static UnityChess.SquareUtil;
 /// Manages the visual representation of the chess board and piece placement.
 /// Inherits from MonoBehaviourSingleton to ensure only one instance exists.
 /// </summary>
-public class BoardManager : MonoBehaviourSingleton<BoardManager> {
+public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
 	// Array holding references to all square GameObjects (64 squares for an 8x8 board).
 	private readonly GameObject[] allSquaresGO = new GameObject[64];
 	// Dictionary mapping board squares to their corresponding GameObjects.
@@ -19,14 +20,12 @@ public class BoardManager : MonoBehaviourSingleton<BoardManager> {
 	private const float BoardPlaneSideHalfLength = BoardPlaneSideLength * 0.5f;
 	// The vertical offset for placing the board (height above the base).
 	private const float BoardHeight = 1.6f;
-    private Dictionary<ulong, bool> playerConnections = new Dictionary<ulong, bool>();
 
-
-    /// <summary>
-    /// Awake is called when the script instance is being loaded.
-    /// Sets up the board, subscribes to game events, and creates the square GameObjects.
-    /// </summary>
-    private void Awake() {
+	/// <summary>
+	/// Awake is called when the script instance is being loaded.
+	/// Sets up the board, subscribes to game events, and creates the square GameObjects.
+	/// </summary>
+	public override void OnNetworkSpawn() {
 		// Subscribe to game events to update the board when a new game starts or when the game is reset.
 		GameManager.NewGameStartedEvent += OnNewGameStarted;
 		GameManager.GameResetToHalfMoveEvent += OnGameResetToHalfMove;
@@ -119,28 +118,40 @@ public class BoardManager : MonoBehaviourSingleton<BoardManager> {
 		rookGO.transform.localPosition = Vector3.zero;
 	}
 
-	/// <summary>
-	/// Instantiates and places the visual representation of a piece on the board.
-	/// </summary>
-	/// <param name="piece">The chess piece to display.</param>
-	/// <param name="position">The board square where the piece should be placed.</param>
-	public void CreateAndPlacePieceGO(Piece piece, Square position) {
-		// Construct the model name based on the piece's owner and type.
-		string modelName = $"{piece.Owner} {piece.GetType().Name}";
-		// Instantiate the piece GameObject from the corresponding resource.
-		GameObject pieceGO = Instantiate(
-			Resources.Load("PieceSets/Marble/" + modelName) as GameObject,
-			positionMap[position].transform
-		);
-	}
+    /// <summary>
+    /// Instantiates and places the visual representation of a piece on the board.
+    /// </summary>
+    /// <param name="piece">The chess piece to display.</param>
+    /// <param name="position">The board square where the piece should be placed.</param>
+    public void CreateAndPlacePieceGO(Piece piece, Square position)
+    {
+        // Construct the model name based on the piece's owner and type.
+        string modelName = $"{piece.Owner} {piece.GetType().Name}";
+        // Load the prefab.
+        GameObject prefab = Resources.Load("PieceSets/Marble/" + modelName) as GameObject;
+        if (prefab == null)
+        {
+            Debug.LogError("Prefab not found: PieceSets/Marble/" + modelName);
+            return;
+        }
+        // Instantiate the piece at the position of the corresponding square.
+        GameObject pieceGO = Instantiate(prefab, positionMap[position].transform.position, Quaternion.identity, positionMap[position].transform);
 
-	/// <summary>
-	/// Retrieves all square GameObjects within a specified radius of a world-space position.
-	/// </summary>
-	/// <param name="squareGOs">A list to be populated with the found square GameObjects.</param>
-	/// <param name="positionWS">The world-space position to check around.</param>
-	/// <param name="radius">The radius within which to search.</param>
-	public void GetSquareGOsWithinRadius(List<GameObject> squareGOs, Vector3 positionWS, float radius) {
+        // If this object has a NetworkObject component, spawn it so clients can see it.
+        NetworkObject netObj = pieceGO.GetComponent<NetworkObject>();
+        if (netObj != null && NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer)
+        {
+            netObj.Spawn();
+        }
+    }
+
+    /// <summary>
+    /// Retrieves all square GameObjects within a specified radius of a world-space position.
+    /// </summary>
+    /// <param name="squareGOs">A list to be populated with the found square GameObjects.</param>
+    /// <param name="positionWS">The world-space position to check around.</param>
+    /// <param name="radius">The radius within which to search.</param>
+    public void GetSquareGOsWithinRadius(List<GameObject> squareGOs, Vector3 positionWS, float radius) {
 		// Compute the square of the radius for efficiency.
 		float radiusSqr = radius * radius;
 		// Iterate over all square GameObjects.

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "164995110350",
+    "project_id": "connectedgamingassignmen-444f9",
+    "storage_bucket": "connectedgamingassignmen-444f9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:164995110350:android:021d48f16350f99137879f",
+        "android_client_info": {
+          "package_name": "com.mcast.connectedgamingassignment"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyASew3vouf1cEm8QQYSPYvDC4g42DrgBro"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
