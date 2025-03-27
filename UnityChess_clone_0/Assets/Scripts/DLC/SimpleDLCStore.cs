@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using UnityEngine.Networking;
+using Unity.Netcode;
 
 public class SimpleDLCStore : MonoBehaviour
 {
@@ -22,11 +23,20 @@ public class SimpleDLCStore : MonoBehaviour
     {
         storePanel.SetActive(false);
 
+        // Already inside FetchStoreData callback
         firebaseManager.FetchStoreData(() =>
         {
             PopulateProfileAndCurrency();
             PopulatePrefabs();
+
+            // 🔄 Apply current equipped skin in SkinSyncManager
+            if (int.TryParse(firebaseManager.equippedSkinId, out int parsedId))
+            {
+                var syncManager = FindObjectOfType<SkinSyncManager>();
+                syncManager?.UpdateEquippedSkin(parsedId);
+            }
         });
+
     }
 
     private void Update()
@@ -91,6 +101,10 @@ public class SimpleDLCStore : MonoBehaviour
                         firebaseManager.SaveEquippedSkinToFirestore(skinId);
                         firebaseManager.DownloadAndApplyProfileImage(skin.previewImageURL);
                         StartCoroutine(DownloadImage(skin.previewImageURL, profileImageUI));
+
+                        var syncManager = FindObjectOfType<SkinSyncManager>();
+                        syncManager?.UpdateEquippedSkin(int.Parse(skinId));
+
                         RefreshAllButtons();
                     });
                 }
@@ -105,19 +119,22 @@ public class SimpleDLCStore : MonoBehaviour
                     if (firebaseManager.playerCurrency >= skin.price)
                     {
                         firebaseManager.playerCurrency -= skin.price;
-                        firebaseManager.SaveCurrencyToFirestore(); // ✅ Save currency
+                        firebaseManager.SaveCurrencyToFirestore();
                         currencyTextUI.text = $"Currency: {firebaseManager.playerCurrency}";
 
-                        firebaseManager.ownedSkins.Add(skinId);
-                        firebaseManager.SaveOwnedSkinsToFirestore();
+                        // ✅ NEW: Use PurchaseSkin(), which includes analytics logging
+                        firebaseManager.PurchaseSkin(skinId);
+
 
                         firebaseManager.SaveEquippedSkinToFirestore(skinId);
                         firebaseManager.DownloadAndApplyProfileImage(skin.previewImageURL);
                         StartCoroutine(DownloadImage(skin.previewImageURL, profileImageUI));
 
-                        RefreshAllButtons();
+                        var syncManager = FindObjectOfType<SkinSyncManager>();
+                        syncManager?.UpdateEquippedSkin(int.Parse(skinId));
 
                         Debug.Log($"Purchased and equipped skin {skinId}");
+                        RefreshAllButtons();
                     }
                     else
                     {

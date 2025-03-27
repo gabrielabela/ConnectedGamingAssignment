@@ -16,7 +16,20 @@ public class VisualPiece : NetworkBehaviour
     private string initialSquareName;
 
     // Getter uses parent's name if available; otherwise, falls back to initialSquareName.
-    public Square CurrentSquare => transform.parent != null ? StringToSquare(transform.parent.name) : new Square(initialSquareName);
+    public Square CurrentSquare
+    {
+        get
+        {
+            if (transform.parent != null && !string.IsNullOrEmpty(transform.parent.name))
+            {
+                Debug.Log($"[CurrentSquare] Using parent: {transform.parent.name}");
+                return StringToSquare(transform.parent.name);
+            }
+            Debug.LogWarning($"[CurrentSquare] Using fallback: {initialSquareName}");
+            return StringToSquare(initialSquareName);
+        }
+    }
+
 
     private const float SquareCollisionRadius = 9f;
     private Camera boardCamera;
@@ -89,4 +102,6 @@ public class VisualPiece : NetworkBehaviour
         }
         VisualPieceMoved?.Invoke(CurrentSquare, thisTransform, closestSquareTransform);
     }
+
+
 }

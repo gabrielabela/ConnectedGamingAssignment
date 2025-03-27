@@ -16,11 +16,11 @@ public class GameManager : NetworkBehaviourSingleton<GameManager> {
 	public static event Action GameEndedEvent;
 	public static event Action GameResetToHalfMoveEvent;
 	public static event Action MoveExecutedEvent;
-	
-	/// <summary>
-	/// Gets the current board state from the game.
-	/// </summary>
-	public Board CurrentBoard {
+
+    /// <summary>
+    /// Gets the current board state from the game.
+    /// </summary>
+    public Board CurrentBoard {
 		get {
 			// Attempts to retrieve the current board from the board timeline.
 			game.BoardTimeline.TryGetCurrent(out Board currentBoard);
@@ -133,13 +133,15 @@ public class GameManager : NetworkBehaviourSingleton<GameManager> {
 	public async void StartNewGame() {
 		game = new Game();
 		NewGameStartedEvent?.Invoke();
-	}
+        AnalyticsLogger.Instance?.LogMatchEvent("start", FirebaseManager.Instance.userID);
 
-	/// <summary>
-	/// Serialises the current game state using the selected serialization format.
-	/// </summary>
-	/// <returns>A string representing the serialised game state.</returns>
-	public string SerializeGame() {
+    }
+
+    /// <summary>
+    /// Serialises the current game state using the selected serialization format.
+    /// </summary>
+    /// <returns>A string representing the serialised game state.</returns>
+    public string SerializeGame() {
 		return serializersByType.TryGetValue(selectedSerializationType, out IGameSerializer serializer)
 			? serializer?.Serialize(game)
 			: null;
@@ -169,6 +171,7 @@ public class GameManager : NetworkBehaviourSingleton<GameManager> {
 		GameResetToHalfMoveEvent?.Invoke();
 	}
 
+	
 	/// <summary>
 	/// Attempts to execute a given move in the game.
 	/// </summary>
@@ -187,7 +190,10 @@ public class GameManager : NetworkBehaviourSingleton<GameManager> {
 		if (latestHalfMove.CausedCheckmate || latestHalfMove.CausedStalemate) {
 			BoardManager.Instance.SetActiveAllPieces(false);
 			GameEndedEvent?.Invoke();
-		} else {
+            AnalyticsLogger.Instance?.LogMatchEvent("end", FirebaseManager.Instance.userID);
+
+        }
+        else {
 			// Otherwise, ensure that only the pieces of the side to move are enabled.
 			BoardManager.Instance.EnsureOnlyPiecesOfSideAreEnabled(SideToMove);
 		}
@@ -290,8 +296,19 @@ public class GameManager : NetworkBehaviourSingleton<GameManager> {
 	/// <param name="closestBoardSquareTransform">The transform of the closest board square.</param>
 	/// <param name="promotionPiece">Optional promotion piece (used in pawn promotion).</param>
 	private async void OnPieceMoved(Square movedPieceInitialSquare, Transform movedPieceTransform, Transform closestBoardSquareTransform, Piece promotionPiece = null) {
-		// Determine the destination square based on the name of the closest board square transform.
-		Square endSquare = new Square(closestBoardSquareTransform.name);
+
+        if (!IsServer)
+            return;
+        // Get the moving piece and enforce turn validation:
+        Piece movingPiece = CurrentBoard[movedPieceInitialSquare];
+        if (TurnManager.Instance.CurrentTurn.Value != movingPiece.Owner)
+        {
+            Debug.LogWarning("Server rejected move: not the current turn.");
+            movedPieceTransform.position = movedPieceTransform.parent.position;
+            return;
+        }
+        // Determine the destination square based on the name of the closest board square transform.
+        Square endSquare = new Square(closestBoardSquareTransform.name);
 
 		// Attempt to retrieve a legal move from the game logic.
 		if (!game.TryGetLegalMove(movedPieceInitialSquare, endSquare, out Movement move)) {
@@ -339,4 +356,6 @@ public class GameManager : NetworkBehaviourSingleton<GameManager> {
 	public bool HasLegalMoves(Piece piece) {
 		return game.TryGetLegalMovesForPiece(piece, out _);
 	}
+
+
 }

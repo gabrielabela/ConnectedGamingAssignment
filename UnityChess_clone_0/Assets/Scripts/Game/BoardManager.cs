@@ -143,6 +143,13 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
         {
             netObj.Spawn();
         }
+        VisualPiece visualPiece = pieceGO.GetComponent<VisualPiece>();
+        if (visualPiece != null)
+        {
+            visualPiece.SetInitialSquare(position.ToString());
+        }
+
+
     }
 
     /// <summary>

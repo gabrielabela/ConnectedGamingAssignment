@@ -1,12 +1,13 @@
-using UnityEngine;
+﻿using UnityEngine;
 using Firebase.Firestore;
 using Firebase.Extensions;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine.Networking;
+using Firebase.Firestore; // Make sure this is at the top of your script
 
-[System.Serializable]
+
 public class SkinData
 {
     public string skinName;
@@ -17,6 +18,8 @@ public class SkinData
 
 public class FirebaseManager : MonoBehaviour
 {
+    public static FirebaseManager Instance { get; private set; }
+
     public FirebaseFirestore db;
     public string userID;
 
@@ -28,6 +31,14 @@ public class FirebaseManager : MonoBehaviour
 
     private void Awake()
     {
+        if (Instance != null && Instance != this)
+        {
+            Destroy(gameObject);
+            return;
+        }
+        Instance = this;
+        DontDestroyOnLoad(gameObject);
+
         FirebaseFirestore.DefaultInstance.Settings.PersistenceEnabled = false;
         db = FirebaseFirestore.DefaultInstance;
 
@@ -51,7 +62,6 @@ public class FirebaseManager : MonoBehaviour
 
         Debug.Log("Using Firebase userID: " + userID);
     }
-
     public void FetchStoreData(System.Action onComplete)
     {
         StartCoroutine(FetchAllDataCoroutine(onComplete));
@@ -105,12 +115,16 @@ public class FirebaseManager : MonoBehaviour
             {
                 string currencyString = userDoc.GetValue<string>("currency");
                 playerCurrency = int.Parse(currencyString);
-
                 if (userDoc.ContainsField("ownedSkins"))
                 {
                     ownedSkins = userDoc.GetValue<List<string>>("ownedSkins");
-                    Debug.Log("Loaded owned skins: " + string.Join(",", ownedSkins));
                 }
+                else
+                {
+                    ownedSkins = new List<string>();
+                    Debug.Log("No ownedSkins field found, initializing empty list.");
+                }
+
 
                 if (userDoc.ContainsField("equippedSkin"))
                 {
@@ -227,4 +241,17 @@ public class FirebaseManager : MonoBehaviour
             }
         });
     }
+
+    public void PurchaseSkin(string skinId)
+    {
+        if (!ownedSkins.Contains(skinId))
+        {
+            ownedSkins.Add(skinId);
+            SaveOwnedSkinsToFirestore();
+
+            // ✅ Log DLC purchase here
+            AnalyticsLogger.Instance?.LogDLCPurchase(skinId, userID);
+        }
+    }
+
 }
