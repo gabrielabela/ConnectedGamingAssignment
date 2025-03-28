@@ -12,23 +12,24 @@ public class VisualPiece : NetworkBehaviour
     public Side PieceColor;
 
     // Store the initial square name if parent's not available.
-    [SerializeField]
-    private string initialSquareName;
+    //[SerializeField]
+    //private string initialSquareName;
+    public Square CurrentSquare => StringToSquare(transform.parent.name);
 
     // Getter uses parent's name if available; otherwise, falls back to initialSquareName.
-    public Square CurrentSquare
-    {
-        get
-        {
-            if (transform.parent != null && !string.IsNullOrEmpty(transform.parent.name))
-            {
-                Debug.Log($"[CurrentSquare] Using parent: {transform.parent.name}");
-                return StringToSquare(transform.parent.name);
-            }
-            Debug.LogWarning($"[CurrentSquare] Using fallback: {initialSquareName}");
-            return StringToSquare(initialSquareName);
-        }
-    }
+    //public Square CurrentSquare
+    //{
+    //    get
+    //    {
+    //        if (transform.parent != null && !string.IsNullOrEmpty(transform.parent.name))
+    //        {
+    //            Debug.Log($"[CurrentSquare] Using parent: {transform.parent.name}");
+    //            return StringToSquare(transform.parent.name);
+    //        }
+    //        Debug.LogWarning($"[CurrentSquare] Using fallback: {initialSquareName}");
+    //        return StringToSquare(initialSquareName);
+    //    }
+    //}
 
 
     private const float SquareCollisionRadius = 9f;
@@ -43,17 +44,17 @@ public class VisualPiece : NetworkBehaviour
         thisTransform = transform;
         boardCamera = Camera.main;
         // Attempt to store initialSquareName from parent's name if available.
-        if (transform.parent != null)
-        {
-            initialSquareName = transform.parent.name;
-        }
+        //if (transform.parent != null)
+        //{
+        //    initialSquareName = transform.parent.name;
+        //}
     }
 
-    // Public setter so BoardManager can assign the square on instantiation.
-    public void SetInitialSquare(string squareName)
-    {
-        initialSquareName = squareName;
-    }
+    //// Public setter so BoardManager can assign the square on instantiation.
+    //public void SetInitialSquare(string squareName)
+    //{
+    //    initialSquareName = squareName;
+    //}
 
     public void OnMouseDown()
     {

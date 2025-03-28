@@ -21,13 +21,20 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
 	// The vertical offset for placing the board (height above the base).
 	private const float BoardHeight = 1.6f;
 
-	/// <summary>
-	/// Awake is called when the script instance is being loaded.
-	/// Sets up the board, subscribes to game events, and creates the square GameObjects.
-	/// </summary>
-	public override void OnNetworkSpawn() {
-		// Subscribe to game events to update the board when a new game starts or when the game is reset.
 
+    private NetworkVariable<SyncedGameStatus> sharedGameStatus = new NetworkVariable<SyncedGameStatus>(
+        new SyncedGameStatus(),
+        NetworkVariableReadPermission.Everyone,
+        NetworkVariableWritePermission.Server);
+
+
+    /// <summary>
+    /// Awake is called when the script instance is being loaded.
+    /// Sets up the board, subscribes to game events, and creates the square GameObjects.
+    /// </summary>
+    public override void OnNetworkSpawn() {
+		// Subscribe to game events to update the board when a new game starts or when the game is reset.
+		base.OnNetworkSpawn();
 		
 		// Initialise the dictionary to map board squares to GameObjects.
 		positionMap = new Dictionary<Square, GameObject>(64);
@@ -40,36 +47,54 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
 		for (int file = 1; file <= 8; file++) {
 			for (int rank = 1; rank <= 8; rank++) {
 				// Create a new GameObject for the square with its name based on chess notation.
-				GameObject squareGO = new GameObject(SquareToString(file, rank)) {
-					// Set the position of the square relative to the board's position.
-					transform = {
-						position = new Vector3(
-							boardPosition.x + FileOrRankToSidePosition(file),
-							boardPosition.y + BoardHeight,
-							boardPosition.z + FileOrRankToSidePosition(rank)
-						),
-						parent = boardTransform // Make the square a child of the board.
-					},
-					// Tag the GameObject as "Square" for identification.
-					tag = "Square"
-				};
+				//GameObject squareGO = new GameObject(SquareToString(file, rank)) {
+				//	// Set the position of the square relative to the board's position.
+				//	transform = {
+				//		position = new Vector3(
+				//			boardPosition.x + FileOrRankToSidePosition(file),
+				//			boardPosition.y + BoardHeight,
+				//			boardPosition.z + FileOrRankToSidePosition(rank)
+				//		),
+				//		parent = boardTransform // Make the square a child of the board.
+				//	},
+				//	// Tag the GameObject as "Square" for identification.
+				//	tag = "Square"
+				//};
+
+				GameObject squareGO = GameObject.Find(SquareToString(file, rank));
 
 				// Add the square and its GameObject to the position map.
 				positionMap.Add(new Square(file, rank), squareGO);
 				// Store the square GameObject in the array at the corresponding index.
 				allSquaresGO[(file - 1) * 8 + (rank - 1)] = squareGO;
-				if (IsServer)
-				{
-                    NetworkObject squareNetworkObject = squareGO.AddComponent<NetworkObject>();
-                    squareNetworkObject.Spawn();
-                    squareNetworkObject.TrySetParent(boardTransform, false);
-                }
+				//if (IsServer)
+				//{
+    //                NetworkObject squareNetworkObject = squareGO.AddComponent<NetworkObject>();
+    //                squareNetworkObject.Spawn();
+    //                squareNetworkObject.TrySetParent(boardTransform, false);
+    //            }
 
             }
 		}
+        if (IsServer)
+		{
+            GameManager.NewGameStartedEvent += OnNewGameStarted;
+            GameManager.GameResetToHalfMoveEvent += OnGameResetToHalfMove;
+            sharedGameStatus.OnValueChanged += OnStatusChanged;
+        }
 
-        GameManager.NewGameStartedEvent += OnNewGameStarted;
-        GameManager.GameResetToHalfMoveEvent += OnGameResetToHalfMove;
+    }
+	
+	public override void OnNetworkDespawn()
+	{
+		base.OnNetworkDespawn();
+
+		if (IsServer)
+		{
+            GameManager.NewGameStartedEvent -= OnNewGameStarted;
+            GameManager.GameResetToHalfMoveEvent -= OnGameResetToHalfMove;
+            sharedGameStatus.OnValueChanged -= OnStatusChanged;
+        }
     }
 
 	/// <summary>
@@ -78,6 +103,11 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
 	/// </summary>
 	private void OnNewGameStarted() {
 		// Remove all existing visual pieces.
+
+		if (!IsServer)
+		{
+			return;
+		}
 		ClearBoard();
 		
 		// Iterate through all current pieces and create their GameObjects at the correct positions.
@@ -85,15 +115,20 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
 			CreateAndPlacePieceGO(piece, square);
 		}
 
-		// Enable only the pieces that belong to the side whose turn it is.
-		EnsureOnlyPiecesOfSideAreEnabled(GameManager.Instance.SideToMove);
-	}
+        // Enable only the pieces that belong to the side whose turn it is.
+        //EnsureOnlyPiecesOfSideAreEnabled(GameManager.Instance.SideToMove);
+        SyncedGameStatus updatedStatus = sharedGameStatus.Value;
+        updatedStatus.ActiveSide = GameManager.Instance.SideToMove;
+        updatedStatus.IsGameOver = false;
+        sharedGameStatus.Value = updatedStatus;
 
-	/// <summary>
-	/// Called when the game is reset to a specific half-move.
-	/// Reconstructs the board to match the game state at that half-move.
-	/// </summary>
-	private void OnGameResetToHalfMove() {
+    }
+
+    /// <summary>
+    /// Called when the game is reset to a specific half-move.
+    /// Reconstructs the board to match the game state at that half-move.
+    /// </summary>
+    private void OnGameResetToHalfMove() {
 		// Clear the current board visuals.
 		ClearBoard();
 
@@ -112,13 +147,26 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
 			EnsureOnlyPiecesOfSideAreEnabled(GameManager.Instance.SideToMove);
 	}
 
-	/// <summary>
-	/// Handles the castling of a rook.
-	/// Moves the rook from its original position to its new position.
-	/// </summary>
-	/// <param name="rookPosition">The starting square of the rook.</param>
-	/// <param name="endSquare">The destination square for the rook.</param>
-	public void CastleRook(Square rookPosition, Square endSquare) {
+    private void OnStatusChanged(SyncedGameStatus oldStatus, SyncedGameStatus newStatus)
+    {
+        if (newStatus.IsGameOver)
+        {
+            SetActiveAllPieces(false);
+        }
+        else
+        {
+            EnsureOnlyPiecesOfSideAreEnabled(newStatus.ActiveSide);
+        }
+    }
+
+
+    /// <summary>
+    /// Handles the castling of a rook.
+    /// Moves the rook from its original position to its new position.
+    /// </summary>
+    /// <param name="rookPosition">The starting square of the rook.</param>
+    /// <param name="endSquare">The destination square for the rook.</param>
+    public void CastleRook(Square rookPosition, Square endSquare) {
 		// Retrieve the rook's GameObject.
 		GameObject rookGO = GetPieceGOAtPosition(rookPosition);
 		// Set the rook's parent to the destination square's GameObject.
@@ -138,23 +186,20 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
         string modelName = $"{piece.Owner} {piece.GetType().Name}";
         // Load the prefab.
         GameObject prefab = Resources.Load("PieceSets/Marble/" + modelName) as GameObject;
-        if (prefab == null)
-        {
-            Debug.LogError("Prefab not found: PieceSets/Marble/" + modelName);
-            return;
-        }
+        //if (prefab == null)
+        //{
+        //    //Debug.LogError("Prefab not found: PieceSets/Marble/" + modelName);
+        //    return;
+        //}
         // Instantiate the piece at the position of the corresponding square.
-        GameObject pieceGO = Instantiate(prefab, positionMap[position].transform.position, Quaternion.identity, positionMap[position].transform);
+        GameObject pieceGO = Instantiate(prefab, positionMap[position].transform);
 
         // If this object has a NetworkObject component, spawn it so clients can see it.
-       if (IsServer)
+       if (IsServer && pieceGO.GetComponent<NetworkObject>() != null)
 		{
             NetworkObject netObj = pieceGO.GetComponent<NetworkObject>();
-            if (netObj != null)
-            {
-                netObj.Spawn();
-				netObj.TrySetParent( positionMap[position].transform);
-            }
+            netObj.Spawn();
+            //netObj.TrySetParent(positionMap[position].transform);
             //VisualPiece visualPiece = pieceGO.GetComponent<VisualPiece>();
             //if (visualPiece != null)
             //{
@@ -234,19 +279,20 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
 		// Return the first child GameObject (which represents the piece) if it exists.
 		return square.transform.childCount == 0 ? null : square.transform.GetChild(0).gameObject;
 	}
-	
+
 	/// <summary>
 	/// Computes the world-space position offset for a given file or rank index.
 	/// </summary>
 	/// <param name="index">The file or rank index (1 to 8).</param>
 	/// <returns>The computed offset from the centre of the board plane.</returns>
-	private static float FileOrRankToSidePosition(int index) {
+	private static float FileOrRankToSidePosition(int index)
+	{
 		// Calculate a normalized parameter (t) based on the index.
 		float t = (index - 1) / 7f;
 		// Interpolate between the negative and positive half-length of the board side.
 		return Mathf.Lerp(-BoardPlaneSideHalfLength, BoardPlaneSideHalfLength, t);
 	}
-	
+
 	/// <summary>
 	/// Clears all visual pieces from the board.
 	/// </summary>

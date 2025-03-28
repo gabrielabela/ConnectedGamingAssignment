@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Unity.Netcode;
 using UnityChess;
 using UnityEngine;
+using static UnityChess.SquareUtil;
 
 /// <summary>
 /// Manages the overall game state, including game start, moves execution,
@@ -399,8 +400,37 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
             //movedPieceTransform.parent = closestBoardSquareTransform;
             // Simply update the moved piece's position without reparenting.
             movedPieceTransform.position = closestBoardSquareTransform.position;
+            BroadcastMoveClientRpc(move.Start.ToString(), move.End.ToString(), move is PromotionMove);
+
         }
     }
+
+
+    [ClientRpc]
+    private void BroadcastMoveClientRpc(string startSquareName, string endSquareName, bool isPromotion)
+    {
+        if (IsServer) return; // Host already applied the move locally
+
+        Square start = StringToSquare(startSquareName);
+        Square end = StringToSquare(endSquareName);
+
+        // Destroy destination piece if there's one (like in captures)
+        BoardManager.Instance.TryDestroyVisualPiece(end);
+
+        // Move the visual piece on the client
+        GameObject pieceGO = BoardManager.Instance.GetPieceGOAtPosition(start);
+        if (pieceGO != null)
+        {
+            Transform squareTransform = BoardManager.Instance.GetSquareGOByPosition(end).transform;
+
+            // ❌ DO NOT: pieceGO.transform.SetParent(squareTransform);
+            // ✅ DO: Just update position
+            pieceGO.transform.position = squareTransform.position;
+        }
+    }
+
+
+
 
     /// <summary>
     /// Determines whether the specified piece has any legal moves.
