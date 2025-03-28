@@ -254,4 +254,49 @@ public class FirebaseManager : MonoBehaviour
         }
     }
 
+    public void SaveCurrentGameState(string fen)
+    {
+        DocumentReference userRef = db.Collection("Users").Document(userID);
+
+        Dictionary<string, object> update = new Dictionary<string, object>
+    {
+        { "lastSavedGame", fen }
+    };
+
+        userRef.UpdateAsync(update).ContinueWithOnMainThread(task =>
+        {
+            if (task.IsCompleted)
+            {
+                Debug.Log("[FirebaseManager] Saved game state to Firestore.");
+            }
+            else
+            {
+                Debug.LogError("[FirebaseManager] Failed to save game state: " + task.Exception);
+            }
+        });
+    }
+
+    public void LoadSavedGameState(Action<string> onComplete)
+    {
+        DocumentReference userRef = db.Collection("Users").Document(userID);
+
+        userRef.GetSnapshotAsync().ContinueWithOnMainThread(task =>
+        {
+            if (task.IsCompleted && task.Result.Exists)
+            {
+                string fen = task.Result.ContainsField("lastSavedGame")
+                    ? task.Result.GetValue<string>("lastSavedGame")
+                    : null;
+
+                onComplete?.Invoke(fen);
+            }
+            else
+            {
+                Debug.LogWarning("[FirebaseManager] No saved game state found.");
+                onComplete?.Invoke(null);
+            }
+        });
+    }
+
+
 }

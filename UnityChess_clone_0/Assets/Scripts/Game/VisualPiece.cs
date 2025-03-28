@@ -72,7 +72,14 @@ public class VisualPiece : NetworkBehaviour
         }
     }
 
+
     public void OnMouseUp()
+    {
+        OnMouseUpServerRpc();
+    }
+
+    [ServerRpc(RequireOwnership = false)]
+    private void OnMouseUpServerRpc()
     {
         if (TurnManager.Instance.CurrentTurn.Value != PieceColor)
         {
@@ -102,6 +109,5 @@ public class VisualPiece : NetworkBehaviour
         }
         VisualPieceMoved?.Invoke(CurrentSquare, thisTransform, closestSquareTransform);
     }
-
 
 }

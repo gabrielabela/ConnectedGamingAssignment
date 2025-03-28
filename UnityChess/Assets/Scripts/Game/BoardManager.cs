@@ -27,8 +27,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
 	/// </summary>
 	public override void OnNetworkSpawn() {
 		// Subscribe to game events to update the board when a new game starts or when the game is reset.
-		GameManager.NewGameStartedEvent += OnNewGameStarted;
-		GameManager.GameResetToHalfMoveEvent += OnGameResetToHalfMove;
+
 		
 		// Initialise the dictionary to map board squares to GameObjects.
 		positionMap = new Dictionary<Square, GameObject>(64);
@@ -59,9 +58,19 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
 				positionMap.Add(new Square(file, rank), squareGO);
 				// Store the square GameObject in the array at the corresponding index.
 				allSquaresGO[(file - 1) * 8 + (rank - 1)] = squareGO;
-			}
+				if (IsServer)
+				{
+                    NetworkObject squareNetworkObject = squareGO.AddComponent<NetworkObject>();
+                    squareNetworkObject.Spawn();
+                    squareNetworkObject.TrySetParent(boardTransform, false);
+                }
+
+            }
 		}
-	}
+
+        GameManager.NewGameStartedEvent += OnNewGameStarted;
+        GameManager.GameResetToHalfMoveEvent += OnGameResetToHalfMove;
+    }
 
 	/// <summary>
 	/// Called when a new game is started.
@@ -138,18 +147,22 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
         GameObject pieceGO = Instantiate(prefab, positionMap[position].transform.position, Quaternion.identity, positionMap[position].transform);
 
         // If this object has a NetworkObject component, spawn it so clients can see it.
-        NetworkObject netObj = pieceGO.GetComponent<NetworkObject>();
-        if (netObj != null && NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer)
-        {
-            netObj.Spawn();
-        }
-        VisualPiece visualPiece = pieceGO.GetComponent<VisualPiece>();
-        if (visualPiece != null)
-        {
-            visualPiece.SetInitialSquare(position.ToString());
-        }
+       if (IsServer)
+		{
+            NetworkObject netObj = pieceGO.GetComponent<NetworkObject>();
+            if (netObj != null)
+            {
+                netObj.Spawn();
+				netObj.TrySetParent( positionMap[position].transform);
+            }
+            //VisualPiece visualPiece = pieceGO.GetComponent<VisualPiece>();
+            //if (visualPiece != null)
+            //{
+            //    visualPiece.SetInitialSquare(position.ToString());
+            //}
 
-
+            pieceGO.transform.parent = positionMap[position].transform;
+        }
     }
 
     /// <summary>
