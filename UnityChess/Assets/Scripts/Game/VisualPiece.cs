@@ -11,26 +11,8 @@ public class VisualPiece : NetworkBehaviour
 
     public Side PieceColor;
 
-    // Store the initial square name if parent's not available.
-    //[SerializeField]
-    //private string initialSquareName;
+    // We assume the piece's current square is given by its parent’s name.
     public Square CurrentSquare => StringToSquare(transform.parent.name);
-
-    // Getter uses parent's name if available; otherwise, falls back to initialSquareName.
-    //public Square CurrentSquare
-    //{
-    //    get
-    //    {
-    //        if (transform.parent != null && !string.IsNullOrEmpty(transform.parent.name))
-    //        {
-    //            Debug.Log($"[CurrentSquare] Using parent: {transform.parent.name}");
-    //            return StringToSquare(transform.parent.name);
-    //        }
-    //        Debug.LogWarning($"[CurrentSquare] Using fallback: {initialSquareName}");
-    //        return StringToSquare(initialSquareName);
-    //    }
-    //}
-
 
     private const float SquareCollisionRadius = 9f;
     private Camera boardCamera;
@@ -43,72 +25,67 @@ public class VisualPiece : NetworkBehaviour
         potentialLandingSquares = new List<GameObject>();
         thisTransform = transform;
         boardCamera = Camera.main;
-        // Attempt to store initialSquareName from parent's name if available.
-        //if (transform.parent != null)
-        //{
-        //    initialSquareName = transform.parent.name;
-        //}
     }
-
-    //// Public setter so BoardManager can assign the square on instantiation.
-    //public void SetInitialSquare(string squareName)
-    //{
-    //    initialSquareName = squareName;
-    //}
 
     public void OnMouseDown()
     {
-        if (enabled)
-        {
-            piecePositionSS = boardCamera.WorldToScreenPoint(transform.position);
-        }
+        // Only allow the piece owner to interact with it.
+        if (!IsOwner) return;
+        piecePositionSS = boardCamera.WorldToScreenPoint(transform.position);
     }
 
     private void OnMouseDrag()
     {
-        if (enabled)
-        {
-            Vector3 nextPiecePositionSS = new Vector3(Input.mousePosition.x, Input.mousePosition.y, piecePositionSS.z);
-            thisTransform.position = boardCamera.ScreenToWorldPoint(nextPiecePositionSS);
-        }
+        // Only allow the piece owner to drag it.
+        if (!IsOwner) return;
+        Vector3 nextPiecePositionSS = new Vector3(Input.mousePosition.x, Input.mousePosition.y, piecePositionSS.z);
+        thisTransform.position = boardCamera.ScreenToWorldPoint(nextPiecePositionSS);
     }
-
 
     public void OnMouseUp()
     {
-        OnMouseUpServerRpc();
+        if (!IsOwner) return;
+        // Send the final world position of the piece to the server.
+        OnMouseUpServerRpc(thisTransform.position);
     }
 
+    // This ServerRpc is called when the owner releases the piece.
     [ServerRpc(RequireOwnership = false)]
-    private void OnMouseUpServerRpc()
+    private void OnMouseUpServerRpc(Vector3 finalPosition)
     {
+        // Validate turn on the server.
         if (TurnManager.Instance.CurrentTurn.Value != PieceColor)
         {
             Debug.LogWarning("Not your turn!");
+            // Reset the piece's position on the server.
             thisTransform.position = transform.parent != null ? transform.parent.position : thisTransform.position;
             return;
         }
 
+        // Find the nearest landing square based on the passed finalPosition.
         potentialLandingSquares.Clear();
-        BoardManager.Instance.GetSquareGOsWithinRadius(potentialLandingSquares, thisTransform.position, SquareCollisionRadius);
+        BoardManager.Instance.GetSquareGOsWithinRadius(potentialLandingSquares, finalPosition, SquareCollisionRadius);
         if (potentialLandingSquares.Count == 0)
         {
+            // If no valid square is found, reset the piece's position.
             thisTransform.position = transform.parent != null ? transform.parent.position : thisTransform.position;
             return;
         }
+
         Transform closestSquareTransform = potentialLandingSquares[0].transform;
-        float shortestDistanceFromPieceSquared = (closestSquareTransform.position - thisTransform.position).sqrMagnitude;
+        float shortestDistanceFromPieceSquared = (closestSquareTransform.position - finalPosition).sqrMagnitude;
         for (int i = 1; i < potentialLandingSquares.Count; i++)
         {
             GameObject potentialLandingSquare = potentialLandingSquares[i];
-            float distanceFromPieceSquared = (potentialLandingSquare.transform.position - thisTransform.position).sqrMagnitude;
+            float distanceFromPieceSquared = (potentialLandingSquare.transform.position - finalPosition).sqrMagnitude;
             if (distanceFromPieceSquared < shortestDistanceFromPieceSquared)
             {
                 shortestDistanceFromPieceSquared = distanceFromPieceSquared;
                 closestSquareTransform = potentialLandingSquare.transform;
             }
         }
+
+        // Fire an event so other systems (such as move validation, promotion, etc.) can handle the move.
         VisualPieceMoved?.Invoke(CurrentSquare, thisTransform, closestSquareTransform);
     }
-
 }

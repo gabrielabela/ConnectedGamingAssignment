@@ -148,7 +148,6 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     {
         game = new Game();
         NewGameStartedEvent?.Invoke();
-        AnalyticsLogger.Instance?.LogMatchEvent("start", FirebaseManager.Instance.userID);
 
     }
 
@@ -235,7 +234,7 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         {
             BoardManager.Instance.SetActiveAllPieces(false);
             GameEndedEvent?.Invoke();
-            AnalyticsLogger.Instance?.LogMatchEvent("end", FirebaseManager.Instance.userID);
+            AnalyticsLogger.Instance?.MatchEnd("standard", FirebaseManager.Instance.userID);
 
         }
         else
@@ -248,6 +247,7 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         MoveExecutedEvent?.Invoke();
 
         return true;
+
     }
 
     /// <summary>

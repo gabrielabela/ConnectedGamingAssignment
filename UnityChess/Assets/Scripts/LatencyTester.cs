@@ -38,6 +38,5 @@ public class LatencyTester : NetworkBehaviour
         if (clientId != NetworkManager.Singleton.LocalClientId) return;
 
         latency = (Time.time - clientSendTime) * 1000f;
-        Debug.Log($"[LatencyTester] Ping: {latency:F1} ms");
     }
 }

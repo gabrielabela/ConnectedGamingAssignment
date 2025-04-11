@@ -80,7 +80,7 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
 		{
             GameManager.NewGameStartedEvent += OnNewGameStarted;
             GameManager.GameResetToHalfMoveEvent += OnGameResetToHalfMove;
-            sharedGameStatus.OnValueChanged += OnStatusChanged;
+sharedGameStatus.OnValueChanged += OnStatusChanged;
         }
 
     }
@@ -109,9 +109,10 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
 			return;
 		}
 		ClearBoard();
-		
-		// Iterate through all current pieces and create their GameObjects at the correct positions.
-		foreach ((Square square, Piece piece) in GameManager.Instance.CurrentPieces) {
+        AnalyticsLogger.Instance?.MatchStart("standard", FirebaseManager.Instance.userID);
+
+        // Iterate through all current pieces and create their GameObjects at the correct positions.
+        foreach ((Square square, Piece piece) in GameManager.Instance.CurrentPieces) {
 			CreateAndPlacePieceGO(piece, square);
 		}
 
