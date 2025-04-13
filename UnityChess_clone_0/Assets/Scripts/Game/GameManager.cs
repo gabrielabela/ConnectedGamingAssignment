@@ -230,24 +230,88 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         HalfMoveTimeline.TryGetCurrent(out HalfMove latestHalfMove);
 
         // If the latest move resulted in checkmate or stalemate, disable further moves.
-        if (latestHalfMove.CausedCheckmate || latestHalfMove.CausedStalemate)
+        if (latestHalfMove.CausedCheckmate)
         {
-            BoardManager.Instance.SetActiveAllPieces(false);
-            GameEndedEvent?.Invoke();
-            AnalyticsLogger.Instance?.MatchEnd("standard", FirebaseManager.Instance.userID);
+            // Determine the winning side.
+            string outcomeMessage = (SideToMove == Side.White)
+                ? "Checkmate! Black wins!"
+                : "Checkmate! White wins!";
 
+            // Mark the game as over, which triggers OnStatusChanged on BoardManager
+            SyncedGameStatus updatedStatus = BoardManager.Instance.sharedGameStatus.Value;
+            updatedStatus.IsGameOver = true;
+            BoardManager.Instance.sharedGameStatus.Value = updatedStatus;
+
+            EndGame(outcomeMessage);
+        }
+        else if (latestHalfMove.CausedStalemate)
+        {
+            SyncedGameStatus updatedStatus = BoardManager.Instance.sharedGameStatus.Value;
+            updatedStatus.IsGameOver = true;
+            BoardManager.Instance.sharedGameStatus.Value = updatedStatus;
+
+            EndGame("Stalemate! The game is a draw.");
         }
         else
         {
-            // Otherwise, ensure that only the pieces of the side to move are enabled.
             BoardManager.Instance.EnsureOnlyPiecesOfSideAreEnabled(SideToMove);
         }
+
 
         // Signal that a move has been executed.
         MoveExecutedEvent?.Invoke();
 
         return true;
 
+    }
+
+
+    /// <summary>
+    /// Notifies all clients of the game outcome and disables user input.
+    /// </summary>
+    /// <param name="outcomeMessage">A message describing the outcome (e.g. checkmate, stalemate, resignation).</param>
+    [ClientRpc]
+    private void NotifyGameOutcomeClientRpc(string outcomeMessage)
+    {
+        if (IsServer) return; // Only execute this on non-host clients.
+
+        // Disable all visual piece interactions on the client.
+        BoardManager.Instance.SetActiveAllPieces(false);
+
+        // Optionally, show the outcome message using your UI manager.
+        //UIManager.Instance?.ShowGameOutcome(outcomeMessage);
+    }
+
+    /// <summary>
+    /// Called on the server to end the game gracefully and inform all clients of the outcome.
+    /// </summary>
+    /// <param name="outcomeMessage">A message describing the game result.</param>
+    private void EndGame(string outcomeMessage)
+    {
+        // Disable piece interaction on the server.
+        BoardManager.Instance.SetActiveAllPieces(false);
+
+        // Fire any game-end events and log the match ending.
+        GameEndedEvent?.Invoke();
+        AnalyticsLogger.Instance?.MatchEnd("standard", FirebaseManager.Instance.userID);
+
+        // Notify all clients of the outcome.
+        NotifyGameOutcomeClientRpc(outcomeMessage);
+    }
+
+    /// <summary>
+    /// Called by a client to resign. The server processes the resignation and ends the game.
+    /// </summary>
+    [ServerRpc(RequireOwnership = false)]
+    public void ResignServerRpc()
+    {
+        // In a full implementation, you might track which side is resigning.
+        // For this example, we assume that the side whose turn it is is the one resigning.
+        string outcomeMessage = (SideToMove == Side.White)
+            ? "White resigns. Black wins!"
+            : "Black resigns. White wins!";
+
+        EndGame(outcomeMessage);
     }
 
     /// <summary>
@@ -345,90 +409,119 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     /// <param name="movedPieceTransform">The transform of the moved piece.</param>
     /// <param name="closestBoardSquareTransform">The transform of the closest board square.</param>
     /// <param name="promotionPiece">Optional promotion piece (used in pawn promotion).</param>
-    private async void OnPieceMoved(Square movedPieceInitialSquare, Transform movedPieceTransform, Transform closestBoardSquareTransform, Piece promotionPiece = null)
+    private async void OnPieceMoved(
+        Square movedPieceInitialSquare,
+        Transform movedPieceTransform,
+        Transform closestBoardSquareTransform,
+        Piece promotionPiece = null)
     {
+        // If the game is already over, revert the piece and bail out immediately.
+        if (BoardManager.Instance.sharedGameStatus.Value.IsGameOver)
+        {
+            movedPieceTransform.position = movedPieceTransform.parent.position;
+            RevertMoveClientRpc(movedPieceInitialSquare.ToString());
+            return;
+        }
 
+        // Make sure only the server checks/decides (so we have a single source of truth).
         if (!IsServer)
             return;
-        // Get the moving piece and enforce turn validation:
+
+        // 1) Check turn logic
         Piece movingPiece = CurrentBoard[movedPieceInitialSquare];
-        if (TurnManager.Instance.CurrentTurn.Value != movingPiece.Owner)
+        if (movingPiece != null && movingPiece.Owner != SideToMove)
         {
-            Debug.LogWarning("Server rejected move: not the current turn.");
+            Debug.LogWarning($"Server rejected move: It's {SideToMove}'s turn, but this piece is {movingPiece.Owner}.");
+            // Snap back on the *server*
             movedPieceTransform.position = movedPieceTransform.parent.position;
+            // Snap back on all clients, too
+            RevertMoveClientRpc(movedPieceInitialSquare.ToString());
             return;
         }
-        // Determine the destination square based on the name of the closest board square transform.
-        Square endSquare = new Square(closestBoardSquareTransform.name);
 
-        // Attempt to retrieve a legal move from the game logic.
+        // 2) Check if it's a legal move
+        Square endSquare = new Square(closestBoardSquareTransform.name);
         if (!game.TryGetLegalMove(movedPieceInitialSquare, endSquare, out Movement move))
         {
-            // If no legal move is found, reset the piece's position.
+            Debug.LogWarning("Server rejected move: No legal move found.");
+            // Snap back on the server
             movedPieceTransform.position = movedPieceTransform.parent.position;
-#if DEBUG_VIEW
-			// In debug view, log the legal moves for further analysis.
-			Piece movedPiece = CurrentBoard[movedPieceInitialSquare];
-			game.TryGetLegalMovesForPiece(movedPiece, out ICollection<Movement> legalMoves);
-			UnityChessDebug.ShowLegalMovesInLog(legalMoves);
-#endif
+            // Snap back on all clients
+            RevertMoveClientRpc(movedPieceInitialSquare.ToString());
             return;
         }
 
-        // If the move is a promotion move, set the promotion piece.
+        // If it *is* a valid move, handle special moves, etc.
         if (move is PromotionMove promotionMove)
         {
             promotionMove.SetPromotionPiece(promotionPiece);
         }
 
-        // If the move is not a special move or its special behaviour is successfully handled,
-        // and the move executes successfully...
         if ((move is not SpecialMove specialMove || await TryHandleSpecialMoveBehaviourAsync(specialMove))
-            && TryExecuteMove(move)
-        )
+            && TryExecuteMove(move))
         {
-            // For non-special moves, update the board visuals by destroying any piece at the destination.
-            if (move is not SpecialMove) { BoardManager.Instance.TryDestroyVisualPiece(move.End); }
+            // Remove any piece on the destination if it’s a capture.
+            if (move is not SpecialMove)
+                BoardManager.Instance.TryDestroyVisualPiece(move.End);
 
-            // For promotion moves, update the moved piece transform to the newly created visual piece.
+            // If it was a promotion, the original piece was replaced.
             if (move is PromotionMove)
-            {
                 movedPieceTransform = BoardManager.Instance.GetPieceGOAtPosition(move.End).transform;
+
+            // Now, finalize the piece’s new position on the host:
+            movedPieceTransform.parent = closestBoardSquareTransform;
+            movedPieceTransform.localPosition = Vector3.zero;
+
+            // Tell all other clients to do the same final snap.
+            NetworkObject netObj = movedPieceTransform.GetComponent<NetworkObject>();
+            if (netObj != null)
+            {
+                BroadcastMoveClientRpc(netObj.NetworkObjectId, move.End.ToString(), move is PromotionMove);
             }
-
-            // Re-parent the moved piece to the destination square and update its position.
-            //movedPieceTransform.parent = closestBoardSquareTransform;
-            // Simply update the moved piece's position without reparenting.
-            movedPieceTransform.position = closestBoardSquareTransform.position;
-            BroadcastMoveClientRpc(move.Start.ToString(), move.End.ToString(), move is PromotionMove);
-
+            else
+            {
+                Debug.LogWarning("OnPieceMoved: Moved piece does not have a NetworkObject component.");
+            }
         }
     }
-
 
     [ClientRpc]
-    private void BroadcastMoveClientRpc(string startSquareName, string endSquareName, bool isPromotion)
+    private void RevertMoveClientRpc(string startSquareName)
     {
-        if (IsServer) return; // Host already applied the move locally
+        // The server is the one calling, so clients do the revert.
+        if (IsServer) return;
 
-        Square start = StringToSquare(startSquareName);
-        Square end = StringToSquare(endSquareName);
-
-        // Destroy destination piece if there's one (like in captures)
-        BoardManager.Instance.TryDestroyVisualPiece(end);
-
-        // Move the visual piece on the client
-        GameObject pieceGO = BoardManager.Instance.GetPieceGOAtPosition(start);
-        if (pieceGO != null)
+        Square originalSquare = StringToSquare(startSquareName);
+        // Find the piece on this client by looking up its square
+        GameObject pieceGO = BoardManager.Instance.GetPieceGOAtPosition(originalSquare);
+        if (pieceGO == null)
         {
-            Transform squareTransform = BoardManager.Instance.GetSquareGOByPosition(end).transform;
-
-            // ❌ DO NOT: pieceGO.transform.SetParent(squareTransform);
-            // ✅ DO: Just update position
-            pieceGO.transform.position = squareTransform.position;
+            Debug.LogWarning($"RevertMoveClientRpc: No piece found at {startSquareName} on the client!");
+            return;
         }
+
+        // Snap the client’s piece back to localPosition=0 under its original square.
+        pieceGO.transform.localPosition = Vector3.zero;
     }
 
+    [ClientRpc]
+    private void BroadcastMoveClientRpc(ulong networkObjectId, string endSquareName, bool isPromotion)
+    {
+        if (IsServer) return; // Host already updated its object.
+
+        if (NetworkManager.Singleton.SpawnManager.SpawnedObjects.TryGetValue(networkObjectId, out NetworkObject netObj))
+        {
+            GameObject pieceGO = netObj.gameObject;
+            Square end = StringToSquare(endSquareName);
+            Transform squareTransform = BoardManager.Instance.GetSquareGOByPosition(end).transform;
+            pieceGO.transform.SetParent(squareTransform);
+            pieceGO.transform.localPosition = Vector3.zero;
+        }
+        else
+        {
+            Debug.LogWarning("BroadcastMoveClientRpc: No network object found with id " + networkObjectId);
+        }
+    }
 
 
 
@@ -467,5 +560,7 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
             LoadSavedGame(); // This is your load + sync logic
         }
     }
+
+
 
 }

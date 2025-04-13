@@ -3,6 +3,7 @@ using Unity.Netcode;
 using UnityChess;
 using UnityEngine;
 using static UnityChess.SquareUtil;
+//using static UnityEditor.PlayerSettings;
 
 public class VisualPiece : NetworkBehaviour
 {
@@ -27,25 +28,49 @@ public class VisualPiece : NetworkBehaviour
         boardCamera = Camera.main;
     }
 
+
     public void OnMouseDown()
     {
-        // Only allow the piece owner to interact with it.
-        if (!IsOwner) return;
-        piecePositionSS = boardCamera.WorldToScreenPoint(transform.position);
+        // Do not allow input if the game is over.
+        if (BoardManager.Instance != null && BoardManager.Instance.IsGameOver)
+            return;
+
+        OnMouseDownServerRpc(boardCamera.WorldToScreenPoint(transform.position));
+        piecePositionSS.z = boardCamera.WorldToScreenPoint(transform.position).z;
     }
 
-    private void OnMouseDrag()
+
+    [ServerRpc(RequireOwnership = false)]
+    private void OnMouseDownServerRpc(Vector3 pos)
     {
-        // Only allow the piece owner to drag it.
-        if (!IsOwner) return;
+        piecePositionSS.x = pos.x;
+        piecePositionSS.y = pos.y;
+    }
+
+
+    [ServerRpc(RequireOwnership = false)]
+    private void OnMouseDragServerRpc(Vector3 pos)
+    {
+        thisTransform.position = pos;
+
+    }
+
+    public void OnMouseDrag()
+    {
+        if (BoardManager.Instance != null && BoardManager.Instance.IsGameOver)
+            return;
+
         Vector3 nextPiecePositionSS = new Vector3(Input.mousePosition.x, Input.mousePosition.y, piecePositionSS.z);
-        thisTransform.position = boardCamera.ScreenToWorldPoint(nextPiecePositionSS);
+        Vector3 newWorldPos = boardCamera.ScreenToWorldPoint(nextPiecePositionSS);
+        thisTransform.position = newWorldPos;
+        OnMouseDragServerRpc(newWorldPos);
     }
 
     public void OnMouseUp()
     {
-        if (!IsOwner) return;
-        // Send the final world position of the piece to the server.
+        if (BoardManager.Instance != null && BoardManager.Instance.IsGameOver)
+            return;
+
         OnMouseUpServerRpc(thisTransform.position);
     }
 
@@ -53,14 +78,14 @@ public class VisualPiece : NetworkBehaviour
     [ServerRpc(RequireOwnership = false)]
     private void OnMouseUpServerRpc(Vector3 finalPosition)
     {
-        // Validate turn on the server.
-        if (TurnManager.Instance.CurrentTurn.Value != PieceColor)
-        {
-            Debug.LogWarning("Not your turn!");
-            // Reset the piece's position on the server.
-            thisTransform.position = transform.parent != null ? transform.parent.position : thisTransform.position;
-            return;
-        }
+        //// Validate turn on the server.
+        //if (TurnManager.Instance.CurrentTurn.Value != PieceColor)
+        //{
+        //    Debug.LogWarning("Not your turn!");
+        //    // Reset the piece's position on the server.
+        //    thisTransform.position = transform.parent != null ? transform.parent.position : thisTransform.position;
+        //    return;
+        //}
 
         // Find the nearest landing square based on the passed finalPosition.
         potentialLandingSquares.Clear();

@@ -39,4 +39,16 @@ public class PlayerManager : MonoBehaviour
     {
         return playerSideMap.TryGetValue(clientId, out var side) ? side : Side.White;
     }
+    public ulong GetClientIdForSide(Side side)
+    {
+        foreach (var pair in playerSideMap)
+        {
+            if (pair.Value == side)
+                return pair.Key;
+        }
+
+        Debug.LogError("[PlayerManager] No client found for side: " + side);
+        return 0; // fallback to host
+    }
+
 }

@@ -20,9 +20,10 @@ public class BoardManager : NetworkBehaviourSingleton<BoardManager> {
 	private const float BoardPlaneSideHalfLength = BoardPlaneSideLength * 0.5f;
 	// The vertical offset for placing the board (height above the base).
 	private const float BoardHeight = 1.6f;
+    public bool IsGameOver => sharedGameStatus.Value.IsGameOver;
 
 
-    private NetworkVariable<SyncedGameStatus> sharedGameStatus = new NetworkVariable<SyncedGameStatus>(
+    public NetworkVariable<SyncedGameStatus> sharedGameStatus = new NetworkVariable<SyncedGameStatus>(
         new SyncedGameStatus(),
         NetworkVariableReadPermission.Everyone,
         NetworkVariableWritePermission.Server);
@@ -196,19 +197,26 @@ sharedGameStatus.OnValueChanged += OnStatusChanged;
         GameObject pieceGO = Instantiate(prefab, positionMap[position].transform);
 
         // If this object has a NetworkObject component, spawn it so clients can see it.
-       if (IsServer && pieceGO.GetComponent<NetworkObject>() != null)
-		{
-            NetworkObject netObj = pieceGO.GetComponent<NetworkObject>();
-            netObj.Spawn();
-            //netObj.TrySetParent(positionMap[position].transform);
-            //VisualPiece visualPiece = pieceGO.GetComponent<VisualPiece>();
-            //if (visualPiece != null)
-            //{
-            //    visualPiece.SetInitialSquare(position.ToString());
-            //}
+        //if (IsServer && pieceGO.TryGetComponent(out NetworkObject netObj))
+        //{
+        //    // Determine which player should own the piece based on its color
+        //    ulong ownerClientId = PlayerManager.Instance.GetClientIdForSide(piece.Owner);
 
+        //    // Spawn the piece with ownership
+        //    netObj.SpawnWithOwnership(ownerClientId);
+
+        //    // Parent it visually (optional, after spawning)
+        //    pieceGO.transform.parent = positionMap[position].transform;
+        //}
+        if (IsServer && pieceGO.TryGetComponent(out NetworkObject netObj))
+        {
+            // Spawn the piece without assigning ownership; the server remains the default owner.
+            netObj.Spawn();
             pieceGO.transform.parent = positionMap[position].transform;
         }
+
+
+
     }
 
     /// <summary>
@@ -257,24 +265,27 @@ sharedGameStatus.OnValueChanged += OnStatusChanged;
 		}
 	}
 
-	/// <summary>
-	/// Destroys the visual representation of a piece at the specified square.
-	/// </summary>
-	/// <param name="position">The board square from which to destroy the piece.</param>
-	public void TryDestroyVisualPiece(Square position) {
-		// Find the VisualPiece component within the square's GameObject.
-		VisualPiece visualPiece = positionMap[position].GetComponentInChildren<VisualPiece>();
-		// If a VisualPiece is found, destroy its GameObject immediately.
-		if (visualPiece != null)
-			DestroyImmediate(visualPiece.gameObject);
-	}
-	
-	/// <summary>
-	/// Retrieves the GameObject representing the piece at the given board square.
-	/// </summary>
-	/// <param name="position">The board square to check.</param>
-	/// <returns>The piece GameObject if one exists; otherwise, null.</returns>
-	public GameObject GetPieceGOAtPosition(Square position) {
+    /// <summary>
+    /// Destroys the visual representation of a piece at the specified square.
+    /// </summary>
+    /// <param name="position">The board square from which to destroy the piece.</param>
+    public void TryDestroyVisualPiece(Square position)
+    {
+        if (!IsServer)
+            return; // Only destroy objects on the server/host.
+
+        VisualPiece visualPiece = positionMap[position].GetComponentInChildren<VisualPiece>();
+        if (visualPiece != null)
+            DestroyImmediate(visualPiece.gameObject);
+    }
+
+
+    /// <summary>
+    /// Retrieves the GameObject representing the piece at the given board square.
+    /// </summary>
+    /// <param name="position">The board square to check.</param>
+    /// <returns>The piece GameObject if one exists; otherwise, null.</returns>
+    public GameObject GetPieceGOAtPosition(Square position) {
 		// Get the square GameObject corresponding to the position.
 		GameObject square = GetSquareGOByPosition(position);
 		// Return the first child GameObject (which represents the piece) if it exists.
@@ -313,4 +324,6 @@ sharedGameStatus.OnValueChanged += OnStatusChanged;
 	/// <returns>The corresponding square GameObject.</returns>
 	public GameObject GetSquareGOByPosition(Square position) =>
 		Array.Find(allSquaresGO, go => go.name == SquareToString(position));
+
+
 }
