@@ -20,6 +20,27 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     public static event Action GameResetToHalfMoveEvent;
     public static event Action MoveExecutedEvent;
 
+    private void Update()
+    {
+        // This logic runs only on the server/host.
+        if (!IsServer) return;
+
+        // If "S" is pressed, save the current game state to Firebase.
+        if (Input.GetKeyDown(KeyCode.S))
+        {
+            string fen = SerializeGame(); // Convert current game state to FEN notation.
+            FirebaseManager.Instance.SaveCurrentGameState(fen); // Save to Firestore.
+            Debug.Log("[GameManager] Game state saved!");
+        }
+
+        // If "L" is pressed, attempt to load a previously saved game state.
+        if (Input.GetKeyDown(KeyCode.L))
+        {
+            LoadSavedGame(); // Triggers Firebase load and game state restoration.
+        }
+    }
+
+
     /// <summary>
     /// Gets the current board state from the game.
     /// </summary>
@@ -175,20 +196,24 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
 
     public void LoadSavedGame()
     {
+        // Request the saved game state (FEN string) from Firebase.
         FirebaseManager.Instance.LoadSavedGameState(fen =>
         {
+            // Check if a valid saved game string was returned.
             if (!string.IsNullOrEmpty(fen))
             {
+                // Only the server should load and broadcast the saved game state.
                 if (IsServer)
                 {
-                    LoadGame(fen); // ✅ this method DOES exist here
-                    SyncGameStateServerRpc(fen); // ✅ sync to clients
+                    LoadGame(fen); // Load the board state from the FEN string.
+                    SyncGameStateServerRpc(fen); // Sync the loaded game state with all clients.
                 }
 
                 Debug.Log("[GameManager] Loaded saved game state.");
             }
             else
             {
+                // No saved game was found or the data was empty.
                 Debug.Log("[GameManager] No saved game to load.");
             }
         });
@@ -223,29 +248,32 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         // Attempt to execute the move within the game logic.
         if (!game.TryExecuteMove(move))
         {
+            // If the move is illegal or fails, return false.
             return false;
         }
 
-        // Retrieve the latest half-move from the timeline.
+        // Retrieve the latest half-move from the timeline (used to detect game-ending conditions).
         HalfMoveTimeline.TryGetCurrent(out HalfMove latestHalfMove);
 
         // If the latest move resulted in checkmate or stalemate, disable further moves.
         if (latestHalfMove.CausedCheckmate)
         {
-            // Determine the winning side.
+            // Determine the winning side based on whose turn it was.
             string outcomeMessage = (SideToMove == Side.White)
                 ? "Checkmate! Black wins!"
                 : "Checkmate! White wins!";
 
-            // Mark the game as over, which triggers OnStatusChanged on BoardManager
+            // Mark the game as over in the shared game status (synced via NetworkVariable).
             SyncedGameStatus updatedStatus = BoardManager.Instance.sharedGameStatus.Value;
             updatedStatus.IsGameOver = true;
             BoardManager.Instance.sharedGameStatus.Value = updatedStatus;
 
+            // Trigger end game logic with the winning message.
             EndGame(outcomeMessage);
         }
         else if (latestHalfMove.CausedStalemate)
         {
+            // Handle stalemate — draw condition.
             SyncedGameStatus updatedStatus = BoardManager.Instance.sharedGameStatus.Value;
             updatedStatus.IsGameOver = true;
             BoardManager.Instance.sharedGameStatus.Value = updatedStatus;
@@ -254,15 +282,14 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         }
         else
         {
+            // If game continues, only enable pieces for the side whose turn it is.
             BoardManager.Instance.EnsureOnlyPiecesOfSideAreEnabled(SideToMove);
         }
 
-
-        // Signal that a move has been executed.
+        // Signal that a move has been executed (event subscribers may react).
         MoveExecutedEvent?.Invoke();
 
-        return true;
-
+        return true; // Move executed successfully.
     }
 
 
@@ -278,8 +305,6 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         // Disable all visual piece interactions on the client.
         BoardManager.Instance.SetActiveAllPieces(false);
 
-        // Optionally, show the outcome message using your UI manager.
-        //UIManager.Instance?.ShowGameOutcome(outcomeMessage);
     }
 
     /// <summary>
@@ -305,8 +330,6 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     [ServerRpc(RequireOwnership = false)]
     public void ResignServerRpc()
     {
-        // In a full implementation, you might track which side is resigning.
-        // For this example, we assume that the side whose turn it is is the one resigning.
         string outcomeMessage = (SideToMove == Side.White)
             ? "White resigns. Black wins!"
             : "Black resigns. White wins!";
@@ -423,11 +446,9 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
             return;
         }
 
-        // Make sure only the server checks/decides (so we have a single source of truth).
         if (!IsServer)
             return;
 
-        // 1) Check turn logic
         Piece movingPiece = CurrentBoard[movedPieceInitialSquare];
         if (movingPiece != null && movingPiece.Owner != SideToMove)
         {
@@ -439,7 +460,6 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
             return;
         }
 
-        // 2) Check if it's a legal move
         Square endSquare = new Square(closestBoardSquareTransform.name);
         if (!game.TryGetLegalMove(movedPieceInitialSquare, endSquare, out Movement move))
         {
@@ -489,13 +509,16 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     private void RevertMoveClientRpc(string startSquareName)
     {
         // The server is the one calling, so clients do the revert.
-        if (IsServer) return;
+        if (IsServer) return; // Do nothing if on server/host.
 
+        // Convert square name (e.g., "e2") to internal Square object.
         Square originalSquare = StringToSquare(startSquareName);
-        // Find the piece on this client by looking up its square
+
+        // Find the piece on this client by looking up its square.
         GameObject pieceGO = BoardManager.Instance.GetPieceGOAtPosition(originalSquare);
         if (pieceGO == null)
         {
+            // Log warning if no piece is found at the square.
             Debug.LogWarning($"RevertMoveClientRpc: No piece found at {startSquareName} on the client!");
             return;
         }
@@ -504,21 +527,31 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
         pieceGO.transform.localPosition = Vector3.zero;
     }
 
+
     [ClientRpc]
     private void BroadcastMoveClientRpc(ulong networkObjectId, string endSquareName, bool isPromotion)
     {
         if (IsServer) return; // Host already updated its object.
 
+        // Try to find the spawned object with the given network ID.
         if (NetworkManager.Singleton.SpawnManager.SpawnedObjects.TryGetValue(networkObjectId, out NetworkObject netObj))
         {
+            // Get the GameObject representing the moved piece.
             GameObject pieceGO = netObj.gameObject;
+
+            // Convert the destination square name to a Square object.
             Square end = StringToSquare(endSquareName);
+
+            // Get the transform of the destination square.
             Transform squareTransform = BoardManager.Instance.GetSquareGOByPosition(end).transform;
+
+            // Parent the piece GameObject to the destination square and reset its position.
             pieceGO.transform.SetParent(squareTransform);
             pieceGO.transform.localPosition = Vector3.zero;
         }
         else
         {
+            // Log if no object with that network ID exists on the client.
             Debug.LogWarning("BroadcastMoveClientRpc: No network object found with id " + networkObjectId);
         }
     }
@@ -540,27 +573,6 @@ public class GameManager : NetworkBehaviourSingleton<GameManager>
     {
         LoadGame(fen); // This runs on each client
     }
-
-
-    private void Update()
-    {
-        if (!IsServer) return;
-
-        // Press G to save game state
-        if (Input.GetKeyDown(KeyCode.S))
-        {
-            string fen = SerializeGame();
-            FirebaseManager.Instance.SaveCurrentGameState(fen);
-            Debug.Log("[GameManager] Game state saved!");
-        }
-
-        // Press L to load and sync game state
-        if (Input.GetKeyDown(KeyCode.L))
-        {
-            LoadSavedGame(); // This is your load + sync logic
-        }
-    }
-
 
 
 }
